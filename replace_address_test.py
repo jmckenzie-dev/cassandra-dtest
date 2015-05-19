@@ -242,7 +242,7 @@ class TestReplaceAddress(Tester):
         # check if we skipped already retrieved ranges
         node4.watch_log_for("already available. Skipping streaming.")
         # wait for node3 ready to query
-        node4.watch_log_for("Listening for thrift clients...")
+        node4.watch_log_for("Starting listening for CQL clients")
 
         # check if 2nd bootstrap succeeded
         cursor = self.exclusive_cql_connection(node4)
@@ -296,7 +296,7 @@ class TestReplaceAddress(Tester):
         # check if we reset bootstrap state
         node4.watch_log_for("Resetting bootstrap progress to start fresh", from_mark=mark)
         # wait for node3 ready to query
-        node4.watch_log_for("Listening for thrift clients...", from_mark=mark)
+        node4.watch_log_for("Starting listening for CQL clients", from_mark=mark)
 
         # check if 2nd bootstrap succeeded
         cursor = self.exclusive_cql_connection(node4)
