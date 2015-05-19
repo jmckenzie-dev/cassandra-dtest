@@ -64,8 +64,7 @@ def reset_environment_vars():
 
 def debug(msg):
     LOG.debug(msg, extra={"current_test":CURRENT_TEST})
-    if PRINT_DEBUG:
-        print msg
+    print >> sys.stderr, msg
 
 def retry_till_success(fun, *args, **kwargs):
     timeout = kwargs.pop('timeout', 60)
@@ -185,6 +184,8 @@ class Tester(TestCase):
             node.set_install_dir(install_dir=cdir)
 
     def setUp(self):
+        debug("--------------------------------------------------")
+        debug("Running setUp for test: " + self._testMethodName)
         global CURRENT_TEST
         CURRENT_TEST = self.id() + self._testMethodName
         # cleaning up if a previous execution didn't trigger tearDown (which
@@ -231,7 +232,10 @@ class Tester(TestCase):
         self.connections = []
         self.runners = []
 
+        debug("leaving setUp for test: " + self._testMethodName);
+
     def copy_logs(self, directory=None, name=None):
+        debug("copying logs on test failure")
         """Copy the current cluster's log files somewhere, by default to LOG_SAVED_DIR with a name of 'last'"""
         if directory is None:
             directory = LOG_SAVED_DIR
@@ -243,15 +247,19 @@ class Tester(TestCase):
             os.mkdir(directory)
         logs = [ (node.name, node.logfilename()) for node in self.cluster.nodes.values() ]
         if len(logs) is not 0:
+            debug("len of logs is not 0, backing things up")
             basedir = str(int(time.time() * 1000)) + '_' + self.id()
             logdir = os.path.join(directory, basedir)
             os.mkdir(logdir)
             for n, log in logs:
+                debug("backing up file: " + log)
                 shutil.copyfile(log, os.path.join(logdir, n + ".log"))
             if os.path.exists(name):
                 os.unlink(name)
             if not is_win():
                 os.symlink(basedir, name)
+        else:
+            debug("len of logs is 0, nothing to backup")
 
     def cql_connection(self, node, keyspace=None, user=None,
                        password=None, compression=True, protocol_version=None):
@@ -411,6 +419,7 @@ class Tester(TestCase):
                 pass
 
     def tearDown(self):
+        debug("Running tearDown for test: " + self._testMethodName);
         reset_environment_vars()
 
         for con in self.connections:
@@ -440,9 +449,13 @@ class Tester(TestCase):
                     print "Error saving log:", str(e)
             finally:
                 if not self._preserve_cluster:
+                    debug("No preserve, cleaning up")
                     self._cleanup_cluster()
                 elif self._preserve_cluster and failed:
+                    debug("preserve and failed, cleaning up")
                     self._cleanup_cluster()
+        debug("Leaving tearDown for test: " + self._testMethodName)
+        debug("----------------------------------------------------")
 
     def go(self, func):
         runner = Runner(func)
