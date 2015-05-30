@@ -13,6 +13,8 @@ from cassandra.cluster import Cluster as PyCluster
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.policies import WhiteListRoundRobinPolicy
 
+from six import print_
+
 LOG_SAVED_DIR="logs"
 try:
     os.mkdir(LOG_SAVED_DIR)
@@ -160,16 +162,18 @@ class Tester(TestCase):
             logging.getLogger('cassandra').setLevel(logging.CRITICAL)
 
         if KEEP_TEST_DIR:
+            print_("_cleanup_cluster KEEP_TEST_DIR, stopping cluster", file=sys.stderr, flush=True)
             self.cluster.stop(gently=RECORD_COVERAGE)
         else:
             # when recording coverage the jvm has to exit normally
             # or the coverage information is not written by the jacoco agent
             # otherwise we can just kill the process
             if RECORD_COVERAGE:
+                print_("_cleanup_cluster RECORD_COVERAGE, stopping cluster", file=sys.stderr, flush=True)
                 self.cluster.stop(gently=True)
 
             # Cleanup everything:
-            debug("removing ccm cluster " + self.cluster.name + " at: " + self.test_path)
+            print_("removing ccm cluster {0}".format(self.cluster.name), file=sys.stderr, flush=True)
             self.cluster.remove()
             os.rmdir(self.test_path)
         if os.path.exists(LAST_TEST_DIR):
@@ -185,6 +189,8 @@ class Tester(TestCase):
             node.set_install_dir(install_dir=cdir)
 
     def setUp(self):
+        print_("----------------------------------------------------", file=sys.stderr, flush=True)
+        print_("Enter setUp for test: {0}".format(self._testMethodName), file=sys.stderr, flush=True)
         global CURRENT_TEST
         CURRENT_TEST = self.id() + self._testMethodName
 
@@ -434,6 +440,7 @@ class Tester(TestCase):
                 pass
 
     def tearDown(self):
+        print_("enter tearDown for test {0}".format(self._testMethodName), file=sys.stderr, flush=True)
         reset_environment_vars()
 
         for con in self.connections:
@@ -463,8 +470,10 @@ class Tester(TestCase):
                     print "Error saving log:", str(e)
             finally:
                 if not self._preserve_cluster:
+                    print_("not preserve, cleaning up", file=sys.stderr, flush=True)
                     self._cleanup_cluster()
                 elif self._preserve_cluster and failed:
+                    print_("preserve and failed, cleaning up", file=sys.stderr, flush=True)
                     self._cleanup_cluster()
 
     def go(self, func):
