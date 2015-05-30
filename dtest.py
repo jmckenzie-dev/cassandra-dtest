@@ -175,7 +175,10 @@ class Tester(TestCase):
             # Cleanup everything:
             print_("removing ccm cluster {0}".format(self.cluster.name), file=sys.stderr, flush=True)
             self.cluster.remove()
+            print_("self.cluster.remove called. Now we rmdir", file=sys.stderr)
+            print_("Calling rmdir on path: {0}".format(self.test_path), file=sys.stderr)
             os.rmdir(self.test_path)
+            print_("rmdir call completed.", file=sys.stderr)
         if os.path.exists(LAST_TEST_DIR):
             os.remove(LAST_TEST_DIR)
 
