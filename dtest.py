@@ -196,9 +196,9 @@ class Tester(TestCase):
             node.set_install_dir(install_dir=cdir)
 
     def setUp(self):
+        print_("----------------------------------------------------", file=sys.stderr, flush=True)
+        print_("Enter setUp for test: {0}".format(self._testMethodName), file=sys.stderr, flush=True)
         try:
-            print_("----------------------------------------------------", file=sys.stderr, flush=True)
-            print_("Enter setUp for test: {0}".format(self._testMethodName), file=sys.stderr, flush=True)
             global CURRENT_TEST
             CURRENT_TEST = self.id() + self._testMethodName
 
@@ -271,6 +271,7 @@ class Tester(TestCase):
             print_("Unhandled Exception during setUp: " + str(r), file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
+        print_("Leaving setUp for test: ".format(self._testMethodName), file=sys.stderr)
 
     def copy_logs(self, directory=None, name=None):
         """Copy the current cluster's log files somewhere, by default to LOG_SAVED_DIR with a name of 'last'"""
@@ -429,27 +430,34 @@ class Tester(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        reset_environment_vars()
-        if os.path.exists(LAST_TEST_DIR):
-            with open(LAST_TEST_DIR) as f:
-                test_path = f.readline().strip('\n')
-                name = f.readline()
+        print_("enter tearDownClass", file=sys.stderr)
+        try:
+            reset_environment_vars()
+            if os.path.exists(LAST_TEST_DIR):
+                with open(LAST_TEST_DIR) as f:
+                    test_path = f.readline().strip('\n')
+                    name = f.readline()
+                    try:
+                        cluster = ClusterFactory.load(test_path, name)
+                        # Avoid waiting too long for node to be marked down
+                        if KEEP_TEST_DIR:
+                            cluster.stop(gently=RECORD_COVERAGE)
+                        else:
+                            cluster.remove()
+                            os.rmdir(test_path)
+                    except IOError:
+                        # after a restart, /tmp will be emptied so we'll get an IOError when loading the old cluster here
+                        pass
                 try:
-                    cluster = ClusterFactory.load(test_path, name)
-                    # Avoid waiting too long for node to be marked down
-                    if KEEP_TEST_DIR:
-                        cluster.stop(gently=RECORD_COVERAGE)
-                    else:
-                        cluster.remove()
-                        os.rmdir(test_path)
+                    os.remove(LAST_TEST_DIR)
                 except IOError:
-                    # after a restart, /tmp will be emptied so we'll get an IOError when loading the old cluster here
+                    # Ignore - see comment above
                     pass
-            try:
-                os.remove(LAST_TEST_DIR)
-            except IOError:
-                # Ignore - see comment above
-                pass
+        except Exception as e:
+            print_("Uncaught exception during tearDownClass: " + str(e), file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+        print_("leaving tearDownClass", file=sys.stderr)
 
     def tearDown(self):
         try:
@@ -492,6 +500,7 @@ class Tester(TestCase):
             print_("Uncaught exception during tearDown: " + str(r), file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
+        print_("Leaving tearDown for test: ".format(self._testMethodName), file=sys.stderr)
 
     def go(self, func):
         runner = Runner(func)
