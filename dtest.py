@@ -196,76 +196,81 @@ class Tester(TestCase):
             node.set_install_dir(install_dir=cdir)
 
     def setUp(self):
-        print_("----------------------------------------------------", file=sys.stderr, flush=True)
-        print_("Enter setUp for test: {0}".format(self._testMethodName), file=sys.stderr, flush=True)
-        global CURRENT_TEST
-        CURRENT_TEST = self.id() + self._testMethodName
+        try:
+            print_("----------------------------------------------------", file=sys.stderr, flush=True)
+            print_("Enter setUp for test: {0}".format(self._testMethodName), file=sys.stderr, flush=True)
+            global CURRENT_TEST
+            CURRENT_TEST = self.id() + self._testMethodName
 
-        # On Windows, forcefully terminate any leftover previously running cassandra processes. This is a temporary
-        # workaround until we can determine the cause of intermittent hung-open tests and file-handles.
-        if is_win():
-            try:
-                import psutil
-                for proc in psutil.process_iter():
-                    try:
-                        pinfo = proc.as_dict(attrs=['pid', 'name', 'cmdline'])
-                    except psutil.NoSuchProcess:
-                        pass
-                    else:
-                        if (pinfo['name'] == 'java.exe' and '-Dcassandra' in pinfo['cmdline']):
-                            print 'Found running cassandra process with pid: ' + str(pinfo['pid']) + '. Killing.'
-                            psutil.Process(pinfo['pid']).kill()
-                            sys.stdout.flush()
-                            sys.stderr.flush()
-                            print 'Killing all running python processes to terminate tests now.'
-                            os.system('taskkill /F /FI "imagename eq python.exe"')
+            # On Windows, forcefully terminate any leftover previously running cassandra processes. This is a temporary
+            # workaround until we can determine the cause of intermittent hung-open tests and file-handles.
+            if is_win():
+                try:
+                    import psutil
+                    for proc in psutil.process_iter():
+                        try:
+                            pinfo = proc.as_dict(attrs=['pid', 'name', 'cmdline'])
+                        except psutil.NoSuchProcess:
+                            pass
+                        else:
+                            if (pinfo['name'] == 'java.exe' and '-Dcassandra' in pinfo['cmdline']):
+                                print 'Found running cassandra process with pid: ' + str(pinfo['pid']) + '. Killing.'
+                                psutil.Process(pinfo['pid']).kill()
+                                sys.stdout.flush()
+                                sys.stderr.flush()
+                                print 'Killing all running python processes to terminate tests now.'
+                                os.system('taskkill /F /FI "imagename eq python.exe"')
 
-            except ImportError:
-                debug("WARN: psutil not installed. Cannot detect and kill running cassandra processes - you may see cascading dtest failures.")
+                except ImportError:
+                    debug("WARN: psutil not installed. Cannot detect and kill running cassandra processes - you may see cascading dtest failures.")
 
-        # cleaning up if a previous execution didn't trigger tearDown (which
-        # can happen if it is interrupted by KeyboardInterrupt)
-        # TODO: move that part to a generic fixture
-        if os.path.exists(LAST_TEST_DIR):
-            with open(LAST_TEST_DIR) as f:
-                self.test_path = f.readline().strip('\n')
-                name = f.readline()
-            try:
-                self.cluster = ClusterFactory.load(self.test_path, name)
-                # Avoid waiting too long for node to be marked down
-                if not self._preserve_cluster:
-                    self._cleanup_cluster()
-            except IOError:
-                # after a restart, /tmp will be emptied so we'll get an IOError when loading the old cluster here
-                pass
+            # cleaning up if a previous execution didn't trigger tearDown (which
+            # can happen if it is interrupted by KeyboardInterrupt)
+            # TODO: move that part to a generic fixture
+            if os.path.exists(LAST_TEST_DIR):
+                with open(LAST_TEST_DIR) as f:
+                    self.test_path = f.readline().strip('\n')
+                    name = f.readline()
+                try:
+                    self.cluster = ClusterFactory.load(self.test_path, name)
+                    # Avoid waiting too long for node to be marked down
+                    if not self._preserve_cluster:
+                        self._cleanup_cluster()
+                except IOError:
+                    # after a restart, /tmp will be emptied so we'll get an IOError when loading the old cluster here
+                    pass
 
-        self.cluster = self._get_cluster()
-        if RECORD_COVERAGE:
-            self.__setup_jacoco()
-        # the failure detector can be quite slow in such tests with quick start/stop
-        self.cluster.set_configuration_options(values={'phi_convict_threshold': 5})
+            self.cluster = self._get_cluster()
+            if RECORD_COVERAGE:
+                self.__setup_jacoco()
+            # the failure detector can be quite slow in such tests with quick start/stop
+            self.cluster.set_configuration_options(values={'phi_convict_threshold': 5})
 
-        timeout = 10000
-        if self.cluster_options is not None:
-            self.cluster.set_configuration_options(values=self.cluster_options)
-        else:
-            self.cluster.set_configuration_options(values={
-                'read_request_timeout_in_ms' : timeout,
-                'range_request_timeout_in_ms' : timeout,
-                'write_request_timeout_in_ms' : timeout,
-                'truncate_request_timeout_in_ms' : timeout,
-                'request_timeout_in_ms' : timeout
-            })
+            timeout = 10000
+            if self.cluster_options is not None:
+                self.cluster.set_configuration_options(values=self.cluster_options)
+            else:
+                self.cluster.set_configuration_options(values={
+                    'read_request_timeout_in_ms' : timeout,
+                    'range_request_timeout_in_ms' : timeout,
+                    'write_request_timeout_in_ms' : timeout,
+                    'truncate_request_timeout_in_ms' : timeout,
+                    'request_timeout_in_ms' : timeout
+                })
 
-        with open(LAST_TEST_DIR, 'w') as f:
-            f.write(self.test_path + '\n')
-            f.write(self.cluster.name)
-        if DEBUG:
-            self.cluster.set_log_level("DEBUG")
-        if TRACE:
-            self.cluster.set_log_level("TRACE")
-        self.connections = []
-        self.runners = []
+            with open(LAST_TEST_DIR, 'w') as f:
+                f.write(self.test_path + '\n')
+                f.write(self.cluster.name)
+            if DEBUG:
+                self.cluster.set_log_level("DEBUG")
+            if TRACE:
+                self.cluster.set_log_level("TRACE")
+            self.connections = []
+            self.runners = []
+        except Exception as r:
+            print_("Unhandled Exception during setUp: " + str(r), file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
     def copy_logs(self, directory=None, name=None):
         """Copy the current cluster's log files somewhere, by default to LOG_SAVED_DIR with a name of 'last'"""
@@ -447,41 +452,46 @@ class Tester(TestCase):
                 pass
 
     def tearDown(self):
-        print_("enter tearDown for test {0}".format(self._testMethodName), file=sys.stderr, flush=True)
-        reset_environment_vars()
-
-        for con in self.connections:
-            con.cluster.shutdown()
-
-        for runner in self.runners:
-            try:
-                runner.stop()
-            except:
-                pass
-
-        failed = sys.exc_info() != (None, None, None)
         try:
-            for node in self.cluster.nodelist():
-                if self.allow_log_errors == False:
-                    errors = list(self.__filter_errors(
-                        [' '.join(msg) for msg in node.grep_log_for_errors()]))
-                    if len(errors) is not 0:
-                        failed = True
-                        raise AssertionError('Unexpected error in %s node log: %s' % (node.name, errors))
-        finally:
+            print_("enter tearDown for test {0}".format(self._testMethodName), file=sys.stderr, flush=True)
+            reset_environment_vars()
+
+            for con in self.connections:
+                con.cluster.shutdown()
+
+            for runner in self.runners:
+                try:
+                    runner.stop()
+                except:
+                    pass
+
+            failed = sys.exc_info() != (None, None, None)
             try:
-                if failed or KEEP_LOGS:
-                    # means the test failed. Save the logs for inspection.
-                    self.copy_logs()
-            except Exception as e:
-                    print "Error saving log:", str(e)
+                for node in self.cluster.nodelist():
+                    if self.allow_log_errors == False:
+                        errors = list(self.__filter_errors(
+                            [' '.join(msg) for msg in node.grep_log_for_errors()]))
+                        if len(errors) is not 0:
+                            failed = True
+                            raise AssertionError('Unexpected error in %s node log: %s' % (node.name, errors))
             finally:
-                if not self._preserve_cluster:
-                    print_("not preserve, cleaning up", file=sys.stderr, flush=True)
-                    self._cleanup_cluster()
-                elif self._preserve_cluster and failed:
-                    print_("preserve and failed, cleaning up", file=sys.stderr, flush=True)
-                    self._cleanup_cluster()
+                try:
+                    if failed or KEEP_LOGS:
+                        # means the test failed. Save the logs for inspection.
+                        self.copy_logs()
+                except Exception as e:
+                        print "Error saving log:", str(e)
+                finally:
+                    if not self._preserve_cluster:
+                        print_("not preserve, cleaning up", file=sys.stderr, flush=True)
+                        self._cleanup_cluster()
+                    elif self._preserve_cluster and failed:
+                        print_("preserve and failed, cleaning up", file=sys.stderr, flush=True)
+                        self._cleanup_cluster()
+        except Exception as r:
+            print_("Uncaught exception during tearDown: " + str(r), file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
     def go(self, func):
         runner = Runner(func)
