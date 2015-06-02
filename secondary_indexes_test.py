@@ -4,7 +4,7 @@ import time
 import uuid
 
 from dtest import Tester, debug
-from tools import since
+from tools import since, skipIfWindows
 from assertions import assert_invalid, assert_one
 from cassandra import InvalidRequest
 from cassandra.query import BatchStatement, SimpleStatement
@@ -13,6 +13,7 @@ from cassandra.protocol import ConfigurationException
 
 class TestSecondaryIndexes(Tester):
 
+    @skipIfWindows()
     def bug3367_test(self):
         cluster = self.cluster
         cluster.populate(1).start()
@@ -46,6 +47,7 @@ class TestSecondaryIndexes(Tester):
         result = cursor.execute("SELECT * FROM users WHERE state='CA';")
         assert len(result) == 1, "Expecting 1 users, got" + str(result)
 
+    @skipIfWindows()
     @since('2.1')
     def test_low_cardinality_indexes(self):
         """
@@ -109,6 +111,7 @@ class TestSecondaryIndexes(Tester):
             result = cursor.execute("SELECT * FROM ks.cf WHERE b='1' LIMIT %d;" % (limit,))
             self.assertEqual(limit, len(result))
 
+    @skipIfWindows()
     @since('2.1')
     def test_6924_dropping_ks(self):
         """Tests CASSANDRA-6924
@@ -147,6 +150,7 @@ class TestSecondaryIndexes(Tester):
             count = rows[0][0]
             self.assertEqual(count, 10)
 
+    @skipIfWindows()
     @since('2.1')
     def test_6924_dropping_cf(self):
         """Tests CASSANDRA-6924
@@ -184,6 +188,7 @@ class TestSecondaryIndexes(Tester):
             count = rows[0][0]
             self.assertEqual(count, 10)
 
+    @skipIfWindows()
     @since('2.0')
     def test_8280_validate_indexed_values(self):
         """Tests CASSANDRA-8280
@@ -218,6 +223,7 @@ class TestSecondaryIndexes(Tester):
                                             "INSERT INTO %s (a, b) VALUES (0, ?)",
                                             cursor)
 
+    @skipIfWindows()
     def insert_row_with_oversize_value(self, create_table_cql, create_index_cql, insert_cql, cursor):
         """ Validate two variations of the supplied insert statement, first
         as it is and then again transformed into a conditional statement
@@ -229,6 +235,7 @@ class TestSecondaryIndexes(Tester):
         self._assert_invalid_request(cursor, insert_cql % table_name, value)
         self._assert_invalid_request(cursor, (insert_cql % table_name) + ' IF NOT EXISTS', value)
 
+    @skipIfWindows()
     def _assert_invalid_request(self, cursor, insert_cql, value):
         """ Perform two executions of the supplied statement, as a
         single statement and again as part of a batch
@@ -239,6 +246,7 @@ class TestSecondaryIndexes(Tester):
         batch.add(prepared, [value])
         self._execute_and_fail(lambda: cursor.execute(batch), insert_cql)
 
+    @skipIfWindows()
     def _execute_and_fail(self, operation, cql_string):
         try:
             operation()
@@ -248,6 +256,7 @@ class TestSecondaryIndexes(Tester):
         except InvalidRequest:
             pass
 
+    @skipIfWindows()
     def wait_for_schema_agreement(self, cursor):
         rows = cursor.execute("SELECT schema_version FROM system.local")
         local_version = rows[0]
@@ -267,10 +276,12 @@ class TestSecondaryIndexes(Tester):
 
 
 class TestSecondaryIndexesOnCollections(Tester):
+    @skipIfWindows()
     def __init__(self, *args, **kwargs):
         Tester.__init__(self, *args, **kwargs)
 
     @since('2.1')
+    @skipIfWindows()
     def test_list_indexes(self):
         """
         Checks that secondary indexes on lists work for querying.
@@ -367,6 +378,7 @@ class TestSecondaryIndexesOnCollections(Tester):
             self.assertEqual(str(db_uuids[1]), str(log_entry['unshared_uuid']))
 
     @since('2.1')
+    @skipIfWindows()
     def test_set_indexes(self):
         """
         Checks that secondary indexes on sets work for querying.
@@ -459,6 +471,7 @@ class TestSecondaryIndexesOnCollections(Tester):
             self.assertTrue(log_entry['unshared_uuid'] in db_uuids)
 
     @since('2.1')
+    @skipIfWindows()
     def test_map_indexes(self):
         """
         Checks that secondary indexes on maps work for querying on both keys and values
@@ -601,6 +614,7 @@ class TestSecondaryIndexesOnCollections(Tester):
 class TestUpgradeSecondaryIndexes(Tester):
 
     @since('2.1', max_version='2.1.x')
+    @skipIfWindows()
     def test_read_old_sstables_after_upgrade(self):
         """ from 2.1 the location of sstables changed (CASSANDRA-5202), but existing sstables continue
         to be read from the old location. Verify that this works for index sstables as well as regular
@@ -635,6 +649,7 @@ class TestUpgradeSecondaryIndexes(Tester):
         debug(cluster.cassandra_version())
         assert_one(cursor, query, [0, 0])
 
+    @skipIfWindows()
     def upgrade_to_version(self, tag, nodes=None):
         debug('Upgrading to ' + tag)
         if nodes is None:

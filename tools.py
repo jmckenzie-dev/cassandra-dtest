@@ -1,3 +1,4 @@
+from ccmlib.common import is_win
 from ccmlib.node import Node
 from decorator  import decorator
 from distutils.version import LooseVersion
@@ -153,7 +154,6 @@ def replace_in_file(filepath, search_replacements):
             line = re.sub(regex, replacement, line)
         sys.stdout.write(line)
 
-
 class since(object):
     def __init__(self, cass_version, max_version=None):
         self.cass_version = LooseVersion(cass_version)
@@ -248,6 +248,10 @@ def require(require_pattern):
 
     return unittest.skipIf(skipme, 'require ' + str(require_pattern))
 
+
+def skipIfWindows():
+    skipme = True if is_win() else False
+    return unittest.skipIf(skipme, 'Test skipped on Windows')
 
 def cassandra_git_branch():
     '''Get the name of the git branch at CASSANDRA_DIR.
