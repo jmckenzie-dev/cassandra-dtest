@@ -216,10 +216,6 @@ class Tester(TestCase):
                             if (pinfo['name'] == 'java.exe' and '-Dcassandra' in pinfo['cmdline']):
                                 print 'Found running cassandra process with pid: ' + str(pinfo['pid']) + '. Killing.'
                                 psutil.Process(pinfo['pid']).kill()
-                                sys.stdout.flush()
-                                sys.stderr.flush()
-                                print 'Killing all running python processes to terminate tests now.'
-                                os.system('taskkill /F /FI "imagename eq python.exe"')
 
                 except ImportError:
                     debug("WARN: psutil not installed. Cannot detect and kill running cassandra processes - you may see cascading dtest failures.")
