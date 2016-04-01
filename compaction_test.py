@@ -27,6 +27,9 @@ class TestCompaction(Tester):
         # compaction test for version 2.2.2 and above relies on DEBUG log in debug.log
         self.cluster.set_log_level("DEBUG")
 
+    def range_aware_option(self):
+        return "'range_aware_compaction':" + ("true" if self.range_aware else "false")
+
     @since('0', '2.2.X')
     def compaction_delete_test(self):
         """
@@ -40,7 +43,7 @@ class TestCompaction(Tester):
         session = self.patient_cql_connection(node1)
         self.create_ks(session, 'ks', 1)
 
-        session.execute("create table ks.cf (key int PRIMARY KEY, val int) with compaction = {'class':'" + self.strategy + "'} and gc_grace_seconds = 30;")
+        session.execute("create table ks.cf (key int PRIMARY KEY, val int) with compaction = {'class':'" + self.strategy + "," + self.range_aware_option() + "}' and gc_grace_seconds = 30;")
 
         for x in range(0, 100):
             session.execute('insert into cf (key, val) values (' + str(x) + ',1)')
@@ -155,7 +158,7 @@ class TestCompaction(Tester):
         [node1] = cluster.nodelist()
         session = self.patient_cql_connection(node1)
         self.create_ks(session, 'ks', 1)
-        session.execute("create table cf (key int PRIMARY KEY, val int) with gc_grace_seconds = 0 and compaction= {'class':'" + self.strategy + "'}")
+        session.execute("create table cf (key int PRIMARY KEY, val int) with gc_grace_seconds = 0 and compaction= {'class':'" + self.strategy + "', " + self.range_aware_option() + "}")
 
         for x in range(0, 100):
             session.execute('insert into cf (key, val) values (' + str(x) + ',1)')
@@ -172,8 +175,8 @@ class TestCompaction(Tester):
                 for afile in ssdir:
                     self.assertFalse("Data" in afile, afile)
 
-        except OSError:
-            self.fail("Path to sstables not valid.")
+        except OSError, e:
+            self.fail("Path to sstables not valid. {0}".format(e))
 
     def dtcs_deletion_test(self):
         """
@@ -215,7 +218,11 @@ class TestCompaction(Tester):
         for expired_sstable in expired_sstables:
             self.assertIn(expired_sstable, node1.get_sstables('ks', 'cf'))
 
-        session.execute("alter table cf with compaction =  {'class':'DateTieredCompactionStrategy', 'max_sstable_age_days':0.00035, 'min_threshold':2, 'expired_sstable_check_frequency_seconds':0}")
+        session.execute("""alter table cf with compaction = {{'class':'DateTieredCompactionStrategy',
+                                                               'max_sstable_age_days':0.00035,
+                                                               'min_threshold':2,
+                                                               'expired_sstable_check_frequency_seconds':0,
+                                                               {}}}""".format(self.range_aware_option()))
         time.sleep(1)
         for x in range(0, 100):
             session.execute('insert into cf (key, val) values ({}, {})'.format(x, x))
@@ -280,7 +287,7 @@ class TestCompaction(Tester):
                 session = self.patient_cql_connection(node1)
                 self.create_ks(session, 'ks', 1)
 
-                session.execute("create table ks.cf (key int PRIMARY KEY, val int) with gc_grace_seconds = 0 and compaction= {'class':'" + self.strategy + "'};")
+                session.execute("create table ks.cf (key int PRIMARY KEY, val int) with gc_grace_seconds = 0 and compaction= {'class':'" + self.strategy + "', " + self.range_aware_option() + "};")
 
                 for x in range(0, 100):
                     session.execute('insert into ks.cf (key, val) values (' + str(x) + ',1)')
@@ -346,7 +353,7 @@ class TestCompaction(Tester):
         [node] = cluster.nodelist()
         session = self.patient_cql_connection(node)
         self.create_ks(session, 'ks', 1)
-        session.execute('CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{\'class\':\'{0}\'}}'.format(self.strategy))
+        session.execute(("CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{'class':'{0}', {1}}}").format(self.strategy, self.range_aware_option()))
         node.nodetool('disableautocompaction ks to_disable')
         for i in range(1000):
             session.execute('insert into to_disable (id, d) values ({0}, \'{1}\')'.format(i, 'hello' * 100))
@@ -371,7 +378,7 @@ class TestCompaction(Tester):
         [node] = cluster.nodelist()
         session = self.patient_cql_connection(node)
         self.create_ks(session, 'ks', 1)
-        session.execute('CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{\'class\':\'{0}\', \'enabled\':\'false\'}}'.format(self.strategy))
+        session.execute("CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{'class':'{0}', 'enabled':'false', {1}}}".format(self.strategy, self.range_aware_option()))
         for i in range(1000):
             session.execute('insert into to_disable (id, d) values ({0}, \'{1}\')'.format(i, 'hello' * 100))
             if i % 100 == 0:
@@ -380,7 +387,6 @@ class TestCompaction(Tester):
             log_file = 'system.log'
         else:
             log_file = 'debug.log'
-
         self.assertTrue(len(node.grep_log('Compacting.+to_disable', filename=log_file)) == 0, 'Found compaction log items for {0}'.format(self.strategy))
         # should still be disabled after restart:
         node.stop()
@@ -404,8 +410,8 @@ class TestCompaction(Tester):
         [node] = cluster.nodelist()
         session = self.patient_cql_connection(node)
         self.create_ks(session, 'ks', 1)
-        session.execute('CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{\'class\':\'{0}\'}}'.format(self.strategy))
-        session.execute('ALTER TABLE to_disable WITH compaction = {{\'class\':\'{0}\', \'enabled\':\'false\'}}'.format(self.strategy))
+        session.execute("CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{'class':'{0}', {1}}}".format(self.strategy, self.range_aware_option()))
+        session.execute("ALTER TABLE to_disable WITH compaction = {{'class':'{0}', 'enabled':'false', {1}}}".format(self.strategy, self.range_aware_option()))
         for i in range(1000):
             session.execute('insert into to_disable (id, d) values ({0}, \'{1}\')'.format(i, 'hello' * 100))
             if i % 100 == 0:
@@ -415,9 +421,9 @@ class TestCompaction(Tester):
         else:
             log_file = 'debug.log'
         self.assertTrue(len(node.grep_log('Compacting.+to_disable', filename=log_file)) == 0, 'Found compaction log items for {0}'.format(self.strategy))
-        session.execute('ALTER TABLE to_disable WITH compaction = {{\'class\':\'{0}\', \'enabled\':\'true\'}}'.format(self.strategy))
+        session.execute("ALTER TABLE to_disable WITH compaction = {{'class':'{0}', 'enabled':'true', {1}}}".format(self.strategy, self.range_aware_option()))
         # we need to flush atleast once when altering to enable:
-        session.execute('insert into to_disable (id, d) values (99, \'hello\')')
+        session.execute("insert into to_disable (id, d) values (99, 'hello')")
         node.flush()
         # sleep to allow compactions to start
         time.sleep(2)
@@ -432,7 +438,7 @@ class TestCompaction(Tester):
         [node] = cluster.nodelist()
         session = self.patient_cql_connection(node)
         self.create_ks(session, 'ks', 1)
-        session.execute('CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{\'class\':\'{0}\'}}'.format(self.strategy))
+        session.execute("CREATE TABLE to_disable (id int PRIMARY KEY, d TEXT) WITH compaction = {{'class':'{0}', {1}}}".format(self.strategy, self.range_aware_option()))
         node.nodetool('disableautocompaction ks to_disable')
         for i in range(1000):
             session.execute('insert into to_disable (id, d) values ({0}, \'{1}\')'.format(i, 'hello' * 100))
@@ -443,7 +449,7 @@ class TestCompaction(Tester):
         else:
             log_file = 'debug.log'
         self.assertTrue(len(node.grep_log('Compacting.+to_disable', filename=log_file)) == 0, 'Found compaction log items for {0}'.format(self.strategy))
-        session.execute('ALTER TABLE to_disable WITH compaction = {{\'class\':\'{0}\', \'tombstone_threshold\':0.9}}'.format(self.strategy))
+        session.execute("ALTER TABLE to_disable WITH compaction = {{'class':'{0}', 'tombstone_threshold':0.9, {1}}}".format(self.strategy, self.range_aware_option()))
         session.execute('insert into to_disable (id, d) values (99, \'hello\')')
         node.flush()
         time.sleep(2)
@@ -554,5 +560,6 @@ def stress_write(node, keycount=100000):
 
 strategies = ['LeveledCompactionStrategy', 'SizeTieredCompactionStrategy', 'DateTieredCompactionStrategy']
 for strategy in strategies:
-    cls_name = ('TestCompaction_with_' + strategy)
-    vars()[cls_name] = type(cls_name, (TestCompaction,), {'strategy': strategy, '__test__': True})
+    for range_aware in [True, False]:
+        cls_name = ('TestCompaction_with_' + strategy + ('_rangeaware' if range_aware else ''))
+        vars()[cls_name] = type(cls_name, (TestCompaction,), {'range_aware': range_aware, 'strategy': strategy, '__test__': True})

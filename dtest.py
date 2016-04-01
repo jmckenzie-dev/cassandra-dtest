@@ -588,7 +588,7 @@ class Tester(TestCase):
 
     # We default to UTF8Type because it's simpler to use in tests
     def create_cf(self, session, name, key_type="varchar", speculative_retry=None, read_repair=None, compression=None,
-                  gc_grace=None, columns=None, validation="UTF8Type", compact_storage=False):
+                  gc_grace=None, columns=None, validation="UTF8Type", compact_storage=False, range_aware=False):
 
         additional_columns = ""
         if columns is not None:
@@ -605,7 +605,8 @@ class Tester(TestCase):
         else:
             # if a compression option is omitted, C* will default to lz4 compression
             query += ' AND compression = {}'
-
+        if range_aware:
+            query = '%s AND compaction = {\'class\':\'SizeTieredCompactionStrategy\', \'range_aware_compaction\':true}' % (query)
         if read_repair is not None:
             query = '%s AND read_repair_chance=%f AND dclocal_read_repair_chance=%f' % (query, read_repair, read_repair)
         if gc_grace is not None:

@@ -41,6 +41,10 @@ def _repair_options(version, ks='', cf=None, sequential=True):
 class BaseRepairTest(Tester):
     __test__ = False
 
+    def setUp(self):
+        Tester.setUp(self)
+        self.skip_if_no_range_aware_compaction()
+
     def check_rows_on_node(self, node_to_check, rows, found=None, missings=None, restart=True):
         """
         Function to verify the rows on a given node, without interference
@@ -92,7 +96,7 @@ class BaseRepairTest(Tester):
         session = self.patient_cql_connection(node1)
         session.cluster.default_retry_policy = FlakyRetryPolicy(max_retries=15)
         self.create_ks(session, 'ks', 3)
-        self.create_cf(session, 'cf', read_repair=0.0, columns={'c1': 'text', 'c2': 'text'})
+        self.create_cf(session, 'cf', read_repair=0.0, columns={'c1': 'text', 'c2': 'text'}, range_aware=self.range_aware)
 
         # Insert 1000 keys, kill node 3, insert 1 key, restart node 3, insert 1000 more keys
         debug("Inserting data...")
@@ -328,8 +332,8 @@ class TestRepair(BaseRepairTest):
                 PRIMARY KEY (key, c1)
             )
             WITH gc_grace_seconds=1
-            AND compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': 'false'};
-        """
+            AND compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': 'false' %s};
+        """ % (", 'range_aware_compaction':'true'" if self.range_aware else '')
         session.execute(query)
         time.sleep(.5)
         query = """
@@ -339,8 +343,8 @@ class TestRepair(BaseRepairTest):
                 c2 text,
                 PRIMARY KEY (key, c1)
             )
-            WITH compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': 'false'};
-        """
+            WITH compaction = {'class': 'SizeTieredCompactionStrategy', 'enabled': 'false' %s};
+        """ % (", 'range_aware_compaction':true" if self.range_aware else '')
         session.execute(query)
         time.sleep(.5)
 
@@ -502,7 +506,7 @@ class TestRepair(BaseRepairTest):
         session = self.patient_cql_connection(node1)
         session.execute("CREATE KEYSPACE ks WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 2, 'dc2': 1, 'dc3':1}")
         session.execute("USE ks")
-        self.create_cf(session, 'cf', read_repair=0.0, columns={'c1': 'text', 'c2': 'text'})
+        self.create_cf(session, 'cf', read_repair=0.0, columns={'c1': 'text', 'c2': 'text'}, range_aware=self.range_aware)
 
         # Insert 1000 keys, kill node 2, insert 1 key, restart node 2, insert 1000 more keys
         debug("Inserting data...")
@@ -522,6 +526,11 @@ class TestRepair(BaseRepairTest):
         for node in [node1, node3, node4]:
             self.check_rows_on_node(node, 2001, found=[1000])
         return cluster
+
+    def skip_if_no_range_aware_compaction(self):
+        # todo: it is not actually available before 3.2:
+        if self.range_aware and self.cluster.version() < "3.0":
+            self.skipTest('Range aware compaction is not available in cassandra < 3.0')
 
     @since('2.2')
     def parallel_table_repair_noleak(self):
@@ -865,3 +874,7 @@ class TestRepairDataSystemTable(Tester):
         self.node1.repair()
         _, repair_history = self.repair_table_contents(node=self.node1, include_system_keyspaces=False)
         self.assertTrue(len(repair_history))
+
+for range_aware in [True, False]:
+    cls_name = ('TestRepair' + ('_rangeaware_compaction' if range_aware else ''))
+    vars()[cls_name] = type(cls_name, (TestRepair,), {'range_aware': range_aware, '__test__': True})

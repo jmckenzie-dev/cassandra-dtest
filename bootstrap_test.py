@@ -32,6 +32,8 @@ def assert_bootstrap_state(tester, node, expected_bootstrap_state):
 
 class TestBootstrap(Tester):
 
+    __test__ = False
+
     def __init__(self, *args, **kwargs):
         kwargs['cluster_options'] = {'start_rpc': 'true'}
         # Ignore these log patterns:
@@ -46,6 +48,10 @@ class TestBootstrap(Tester):
         ]
         Tester.__init__(self, *args, **kwargs)
         self.allow_log_errors = True
+
+    def setUp(self):
+        Tester.setUp(self)
+        self.skip_if_no_range_aware_compaction()
 
     def _base_bootstrap_test(self, bootstrap):
         cluster = self.cluster
@@ -64,7 +70,7 @@ class TestBootstrap(Tester):
 
         session = self.patient_cql_connection(node1)
         self.create_ks(session, 'ks', 1)
-        self.create_cf(session, 'cf', columns={'c1': 'text', 'c2': 'text'})
+        self.create_cf(session, 'cf', columns={'c1': 'text', 'c2': 'text'}, range_aware=self.range_aware)
 
         # record the size before inserting any of our own data
         empty_size = node1.data_size()
@@ -156,7 +162,11 @@ class TestBootstrap(Tester):
         cluster.start()
 
         node1 = cluster.nodes['node1']
-        node1.stress(['write', 'n=10K', 'no-warmup', '-rate', 'threads=8', '-schema', 'replication(factor=2)'])
+        stress_options = ['write', 'n=10k', 'no-warmup', '-rate', 'threads=8', '-schema', 'replication(factor=2)']
+
+        if self.range_aware:
+            stress_options.extend(['compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
+        node1.stress(stress_options)
 
         session = self.patient_cql_connection(node1)
         stress_table = 'keyspace1.standard1'
@@ -244,13 +254,16 @@ class TestBootstrap(Tester):
         """
         Test resuming bootstrap after data streaming failure
         """
-
         cluster = self.cluster
         cluster.set_configuration_options(values={'stream_throughput_outbound_megabits_per_sec': 1})
         cluster.populate(2).start(wait_other_notice=True)
 
         node1 = cluster.nodes['node1']
-        node1.stress(['write', 'n=100K', 'no-warmup', 'cl=TWO', '-schema', 'replication(factor=2)', '-rate', 'threads=50'])
+        stress_options = ['write', 'n=100k', 'cl=TWO', '-rate', 'threads=50', '-schema', 'replication(factor=2)']
+
+        if self.range_aware:
+            stress_options.extend(['compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
+        node1.stress(stress_options)
         cluster.flush()
 
         # kill node1 in the middle of streaming to let it fail
@@ -291,13 +304,15 @@ class TestBootstrap(Tester):
     @since('2.2')
     def bootstrap_with_reset_bootstrap_state_test(self):
         """Test bootstrap with resetting bootstrap progress"""
-
         cluster = self.cluster
         cluster.set_configuration_options(values={'stream_throughput_outbound_megabits_per_sec': 1})
         cluster.populate(2).start(wait_other_notice=True)
 
         node1 = cluster.nodes['node1']
-        node1.stress(['write', 'n=100K', '-schema', 'replication(factor=2)'])
+        stress_options = ['write', 'n=100k', '-schema', 'replication(factor=2)']
+        if self.range_aware:
+            stress_options.extend(['compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
+        node1.stress(stress_options)
         node1.flush()
 
         # kill node1 in the middle of streaming to let it fail
@@ -334,10 +349,12 @@ class TestBootstrap(Tester):
         cluster = self.cluster
         cluster.populate(2).start(wait_other_notice=True)
         (node1, node2) = cluster.nodelist()
+        stress_options = ['write', 'n=1K', 'no-warmup', '-rate', 'threads=1', '-pop', 'dist=UNIFORM(1..1000)', '-schema', 'replication(factor=2)']
 
-        node1.stress(['write', 'n=1K', 'no-warmup', '-schema', 'replication(factor=2)',
-                      '-rate', 'threads=1', '-pop', 'dist=UNIFORM(1..1000)'])
+        if self.range_aware:
+            stress_options.extend(['compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
 
+        node1.stress(stress_options)
         session = self.patient_exclusive_cql_connection(node2)
         stress_table = 'keyspace1.standard1'
 
@@ -364,41 +381,41 @@ class TestBootstrap(Tester):
 
         node1 = cluster.nodes['node1']
         yaml_config = """
-        # Create the keyspace and table
-        keyspace: keyspace1
-        keyspace_definition: |
-          CREATE KEYSPACE keyspace1 WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 1, 'dc2': 1};
-        table: users
-        table_definition:
-          CREATE TABLE users (
-            username text,
-            first_name text,
-            last_name text,
-            email text,
-            PRIMARY KEY(username)
-          ) WITH compaction = {'class':'SizeTieredCompactionStrategy'};
-        insert:
-          partitions: fixed(1)
-          batchtype: UNLOGGED
-        queries:
-          read:
-            cql: select * from users where username = ?
-            fields: samerow
-        """
-        with tempfile.NamedTemporaryFile(mode='w+') as stress_config:
-            stress_config.write(yaml_config)
-            stress_config.flush()
-            node1.stress(['user', 'profile=' + stress_config.name, 'n=2M', 'no-warmup',
-                          'ops(insert=1)', '-rate', 'threads=50'])
+            # Create the keyspace and table
+            keyspace: keyspace1
+            keyspace_definition: |
+              CREATE KEYSPACE keyspace1 WITH replication = {'class': 'NetworkTopologyStrategy', 'dc1': 1, 'dc2': 1};
+            table: users
+            table_definition:
+              CREATE TABLE users (
+                username text,
+                first_name text,
+                last_name text,
+                email text,
+                PRIMARY KEY(username)
+              ) WITH compaction = {'class':'SizeTieredCompactionStrategy' %s};
+            insert:
+              partitions: fixed(1)
+              batchtype: UNLOGGED
+            queries:
+              read:
+                cql: select * from users where username = ?
+                fields: samerow
+            """ % (", 'range_aware_compaction':true,'min_range_sstable_size_in_mb':1" if self.range_aware else '')
+        stress_config = tempfile.NamedTemporaryFile(mode='w+', delete=False)
+        stress_config.write(yaml_config)
+        stress_config.close()
+        node1.stress(['user', 'profile=' + stress_config.name, 'n=2M', 'no-warmup',
+                      'ops(insert=1)', '-rate', 'threads=50'])
 
-            node3 = new_node(cluster, data_center='dc2')
-            node3.start(no_wait=True)
-            time.sleep(3)
+        node3 = new_node(cluster, data_center='dc2')
+        node3.start(no_wait=True)
+        time.sleep(3)
 
-            out, err, _ = node1.stress(['user', 'profile=' + stress_config.name, 'ops(insert=1)',
-                                        'n=500K', 'no-warmup', 'cl=LOCAL_QUORUM',
-                                        '-rate', 'threads=5',
-                                        '-errors', 'retries=2'])
+        out, err, _ = node1.stress(['user', 'profile=' + stress_config.name, 'ops(insert=1)',
+                                    'n=500K', 'no-warmup', 'cl=LOCAL_QUORUM',
+                                    '-rate', 'threads=5',
+                                    '-errors', 'retries=2'])
 
         debug(out)
         regex = re.compile("Operation.+error inserting key.+Exception")
@@ -434,8 +451,11 @@ class TestBootstrap(Tester):
 
         # write some data
         node1 = cluster.nodelist()[0]
-        node1.stress(['write', 'n=10K', 'no-warmup', '-rate', 'threads=8'])
+        stress_options = ['write', 'n=10k', 'no-warmup', '-rate', 'threads=8']
+        if self.range_aware:
+            stress_options.extend(['-schema', 'compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
 
+        node1.stress(stress_options)
         session = self.patient_cql_connection(node1)
         original_rows = list(session.execute("SELECT * FROM {}".format(stress_table,)))
 
@@ -471,8 +491,11 @@ class TestBootstrap(Tester):
 
         # write some data
         node1 = cluster.nodelist()[0]
-        node1.stress(['write', 'n=10K', 'no-warmup', '-rate', 'threads=8'])
+        stress_options = ['write', 'n=10K', 'no-warmup', '-rate', 'threads=8']
+        if self.range_aware:
+            stress_options.extend(['-schema', 'compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
 
+        node1.stress(stress_options)
         session = self.patient_cql_connection(node1)
         original_rows = list(session.execute("SELECT * FROM {}".format(stress_table,)))
 
@@ -549,7 +572,10 @@ class TestBootstrap(Tester):
 
         # write some data, enough for the bootstrap to fail later on
         node1 = cluster.nodelist()[0]
-        node1.stress(['write', 'n=100K', 'no-warmup', '-rate', 'threads=8'])
+        stress_options = ['write', 'n=100K', 'no-warmup', '-rate', 'threads=8']
+        if self.range_aware:
+            stress_options.extend(['-schema', 'compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
+        node1.stress(stress_options)
         node1.flush()
 
         session = self.patient_cql_connection(node1)
@@ -596,9 +622,10 @@ class TestBootstrap(Tester):
         cluster.start(wait_for_binary_proto=True)
 
         node1, = cluster.nodelist()
-
-        node1.stress(['write', 'n=500K', 'no-warmup', '-schema', 'replication(factor=1)',
-                      '-rate', 'threads=10'])
+        stress_options = ['write', 'n=500K', 'no-warmup', '-rate', 'threads=10', '-schema', 'replication(factor=1)']
+        if self.range_aware:
+            stress_options.extend(['compaction(strategy=SizeTieredCompactionStrategy,range_aware_compaction=true,min_range_sstable_size_in_mb=1)'])
+        node1.stress(stress_options)
 
         node2 = new_node(cluster)
         node2.start(wait_other_notice=True)
@@ -665,3 +692,12 @@ class TestBootstrap(Tester):
             debug("Deleting {}".format(data_dir))
             shutil.rmtree(data_dir)
         shutil.rmtree(commitlog_dir)
+
+    def skip_if_no_range_aware_compaction(self):
+        # todo: it is not actually available before 3.2:
+        if self.range_aware and self.cluster.version() < "3.0":
+            self.skipTest('Range aware compaction is not available in cassandra < 3.0')
+
+for range_aware in [True, False]:
+    cls_name = ('TestBootstrap' + ('_rangeaware_compaction' if range_aware else ''))
+    vars()[cls_name] = type(cls_name, (TestBootstrap,), {'range_aware': range_aware, '__test__': True})
