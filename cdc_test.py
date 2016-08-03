@@ -2,10 +2,12 @@ from __future__ import division
 
 import errno
 import os
+import re
 import shutil
 import time
 import uuid
 from collections import namedtuple
+from distutils.version import LooseVersion
 from itertools import izip as zip
 from itertools import repeat
 
@@ -43,8 +45,12 @@ def _insert_rows(session, table_name, insert_stmt, values):
     return data_loaded
 
 
-def _move_contents(source_dir, dest_dir, verbose=True):
+def _move_commitlog_segments(source_dir, dest_dir, verbose=True):
     for source_filename in os.listdir(source_dir):
+        # skip any cdc index files and only move .log files
+        if '_cdc' in source_filename:
+            continue
+
         source_path, dest_path = (os.path.join(source_dir, source_filename),
                                   os.path.join(dest_dir, source_filename))
         if verbose:
@@ -256,7 +262,7 @@ class TestCDC(Tester):
         self.cluster.start(wait_for_binary_proto=True)
         node = self.cluster.nodelist()[0]
         session = self.patient_cql_connection(node)
-        create_ks(session, ks_name, rf=1)
+        self.create_ks(session, ks_name, rf=1)
 
         if table_name is not None:
             self.assertIsNotNone(cdc_enabled_table, 'if creating a table in prepare, must specify whether or not CDC is enabled on it')
@@ -471,7 +477,10 @@ class TestCDC(Tester):
         loading_session.cluster.shutdown()
         return loading_node
 
-    def test_cdc_data_available_in_cdc_raw(self):
+    @known_failure(failure_source='test',
+                   jira_url='https://issues.apache.org/jira/browse/CASSANDRA-12286',
+                   flaky=False)
+    def test_cdc_replay(self):
         ks_name = 'ks'
         # First, create a new node just for data generation.
         generation_node, generation_session = self.prepare(ks_name=ks_name)
@@ -501,13 +510,20 @@ class TestCDC(Tester):
         # insert 10000 rows
         inserted_rows = _insert_rows(generation_session, cdc_table_info.name, cdc_table_info.insert_stmt, repeat((), 10000))
 
-        # drain the node to guarantee all cl segements will be recycled
+        # drain the node to guarantee all cl segments will be recycled
         debug('draining')
         generation_node.drain()
         debug('stopping')
         # stop the node and clean up all sessions attached to it
         generation_node.stop()
         generation_session.cluster.shutdown()
+
+        source_cdc_indexes = []
+        # We can rely on the existing _cdc.idx files to determine which .log files contain cdc data.
+        source_path = os.path.join(generation_node.get_path(), 'cdc_raw')
+        for seg in os.listdir(source_path):
+            if '_cdc' in seg:
+                source_cdc_indexes.append(ReplayData(source_path, seg))
 
         # create a new node to use for cdc_raw cl segment replay
         loading_node = self._init_new_loading_node(ks_name, cdc_table_info.create_stmt, self.cluster.version() < '4')
@@ -516,7 +532,7 @@ class TestCDC(Tester):
         # node again to trigger commitlog replay, which should replay the
         # cdc_raw files we moved to commitlogs into memtables.
         debug('moving cdc_raw and restarting node')
-        _move_contents(
+        _move_commitlog_segments(
             os.path.join(generation_node.get_path(), 'cdc_raw'),
             os.path.join(loading_node.get_path(), 'commitlogs')
         )
@@ -533,6 +549,7 @@ class TestCDC(Tester):
         debug('found {cdc} values in CDC table'.format(
             cdc=len(data_in_cdc_table_after_restart)
         ))
+
         # Then we assert that the CDC data that we expect to be there is there.
         # All data that was in CDC tables should have been copied to cdc_raw,
         # then used in commitlog replay, so it should be back in the cluster.
