@@ -1,17 +1,13 @@
-from __future__ import division
-
 import errno
 import os
-import re
 import shutil
 import time
 import uuid
 from collections import namedtuple
-from distutils.version import LooseVersion
 from itertools import izip as zip
 from itertools import repeat
 
-from cassandra import WriteFailure
+from cassandra import CDCWriteFailure
 from cassandra.concurrent import (execute_concurrent,
                                   execute_concurrent_with_args)
 from ccmlib.node import Node
@@ -81,7 +77,7 @@ def _get_create_table_statement(ks_name, table_name, column_spec, options=None):
     )
 
 
-def _write_to_cdc_WriteFailure(session, insert_stmt):
+def _write_to_cdc_CDCWriteFailure(session, insert_stmt):
     prepared = session.prepare(insert_stmt)
     start, rows_loaded, error_found = time.time(), 0, False
     rate_limited_debug = get_rate_limited_function(debug, 5)
@@ -90,7 +86,7 @@ def _write_to_cdc_WriteFailure(session, insert_stmt):
         # takes about 10s, but let's be generous.
         assert_less_equal(
             (time.time() - start), 600,
-            "It's taken more than 10 minutes to reach a WriteFailure trying "
+            "It's taken more than 10 minutes to reach a CDCWriteFailure trying "
             'to overrun the space designated for CDC commitlogs. This could '
             "be because data isn't being written quickly enough in this "
             'environment, or because C* is failing to reject writes when '
@@ -107,7 +103,7 @@ def _write_to_cdc_WriteFailure(session, insert_stmt):
             ((prepared, ()) for _ in range(1000)),
             concurrency=500,
             # Don't propagate errors to the main thread. We expect at least
-            # one WriteFailure, so we handle it below as part of the
+            # one CDCWriteFailure, so we handle it below as part of the
             # results recieved from this method.
             raise_on_first_error=False
         ))
@@ -116,13 +112,13 @@ def _write_to_cdc_WriteFailure(session, insert_stmt):
         # number of successfully completed statements...
         rows_loaded += len([br for br in batch_results if br[0]])
         # then, we make sure that the only failures are the expected
-        # WriteFailures.
+        # CDCWriteFailure.
         assert_equal([],
                      [result for (success, result) in batch_results
-                      if not success and not isinstance(result, WriteFailure)])
-        # Finally, if we find a WriteFailure, that means we've inserted all
+                      if not success and not isinstance(result, CDCWriteFailure)])
+        # Finally, if we find a CDCWriteFailure, that means we've inserted all
         # the CDC data we can and so we flip error_found to exit the loop.
-        if any(isinstance(result, WriteFailure) for (_, result) in batch_results):
+        if any(isinstance(result, CDCWriteFailure) for (_, result) in batch_results):
             debug("write failed (presumably because we've overrun "
                   'designated CDC commitlog space) after '
                   'loading {r} rows in {s:.2f}s'.format(
@@ -207,6 +203,7 @@ def _get_cdc_raw_files(node_path, cdc_raw_dir_name='cdc_raw'):
 class TestCDC(Tester):
     """
     @jira_ticket CASSANDRA-8844
+    @jira_ticket CASSANDRA-12148
 
     Test the correctness of some features of CDC, Change Data Capture, which
     provides a view of the commitlog on tables for which it is enabled.
@@ -262,7 +259,7 @@ class TestCDC(Tester):
         self.cluster.start(wait_for_binary_proto=True)
         node = self.cluster.nodelist()[0]
         session = self.patient_cql_connection(node)
-        self.create_ks(session, ks_name, rf=1)
+        create_ks(session, ks_name, rf=1)
 
         if table_name is not None:
             self.assertIsNotNone(cdc_enabled_table, 'if creating a table in prepare, must specify whether or not CDC is enabled on it')
@@ -377,13 +374,13 @@ class TestCDC(Tester):
         session.execute(empty_cdc_table_info.create_stmt)
 
         # Here, we insert values into the first CDC table until we get a
-        # WriteFailure. This should happen when the CDC commitlogs take up 1MB
+        # CDCWriteFailure. This should happen when the CDC commitlogs take up 1MB
         # or more.
         debug('flushing non-CDC commitlogs')
         node.flush()
         # Then, we insert rows into the CDC table until we can't anymore.
         debug('beginning data insert to fill CDC commitlogs')
-        rows_loaded = _write_to_cdc_WriteFailure(session, full_cdc_table_info.insert_stmt)
+        rows_loaded = _write_to_cdc_CDCWriteFailure(session, full_cdc_table_info.insert_stmt)
 
         self.assertLess(0, rows_loaded,
                         'No CDC rows inserted. This may happen when '
@@ -393,12 +390,12 @@ class TestCDC(Tester):
         commitlogs_size = size_of_files_in_dir(commitlog_dir)
         debug('Commitlog dir ({d}) is {b}B'.format(d=commitlog_dir, b=commitlogs_size))
 
-        # We should get a WriteFailure when trying to write to the CDC table
+        # We should get a CDCWriteFailure when trying to write to the CDC table
         # that's filled the designated CDC space...
-        with self.assertRaises(WriteFailure):
+        with self.assertRaises(CDCWriteFailure):
             session.execute(full_cdc_table_info.insert_stmt)
         # or any CDC table.
-        with self.assertRaises(WriteFailure):
+        with self.assertRaises(CDCWriteFailure):
             session.execute(empty_cdc_table_info.insert_stmt)
 
         # Now we test for behaviors of non-CDC tables when we've exceeded
@@ -477,9 +474,6 @@ class TestCDC(Tester):
         loading_session.cluster.shutdown()
         return loading_node
 
-    @known_failure(failure_source='test',
-                   jira_url='https://issues.apache.org/jira/browse/CASSANDRA-12286',
-                   flaky=False)
     def test_cdc_replay(self):
         ks_name = 'ks'
         # First, create a new node just for data generation.
