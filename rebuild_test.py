@@ -55,6 +55,7 @@ class TestRebuild(Tester):
 
         # populate data in dc1
         session = self.patient_exclusive_cql_connection(node1)
+
         create_ks(session, 'ks', {'dc1': 1})
         create_cf(session, 'cf', columns={'c1': 'text', 'c2': 'text'})
         insert_c1c2(session, n=keys, consistency=ConsistencyLevel.LOCAL_ONE)
